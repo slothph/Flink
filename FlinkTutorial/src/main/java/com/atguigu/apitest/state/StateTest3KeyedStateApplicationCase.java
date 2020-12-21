@@ -3,9 +3,12 @@ package com.atguigu.apitest.state;
 import akka.japi.tuple.Tuple3;
 import com.atguigu.apitest.beans.SensorReading;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.time.Time;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.CheckpointingMode;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -18,6 +21,24 @@ public class StateTest3KeyedStateApplicationCase {
     public static void main(String[] args) throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 //        env.setParallelism(1);
+
+        //检查点配置
+        env.enableCheckpointing(300);
+        //高级配置
+        env.getCheckpointConfig().setCheckpointingMode(CheckpointingMode.EXACTLY_ONCE);
+        env.getCheckpointConfig().setCheckpointTimeout(60000);
+        env.getCheckpointConfig().setMaxConcurrentCheckpoints(1);
+        env.getCheckpointConfig().setMinPauseBetweenCheckpoints(100);
+        env.getCheckpointConfig().setPreferCheckpointForRecovery(true);
+        env.getCheckpointConfig().setTolerableCheckpointFailureNumber(0);
+
+        //3.重启策略配置
+        //固定延迟重启
+        env.setRestartStrategy(RestartStrategies.fixedDelayRestart(3, 100000L));
+        //失败率重启
+        env.setRestartStrategy(RestartStrategies.failureRateRestart(3, Time.minutes(10), Time.minutes(1)));
+
+
         //socket 文本流
         DataStream<String> inputStream = env.socketTextStream("localhost", 7777);
         //转换成SensorReading类型
