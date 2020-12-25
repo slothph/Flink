@@ -1,17 +1,18 @@
 package com.atguigu.apitest.tableapi.udf;
 
 import com.atguigu.apitest.beans.SensorReading;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.Table;
 import org.apache.flink.table.api.java.StreamTableEnvironment;
-import org.apache.flink.table.functions.ScalarFunction;
+import org.apache.flink.table.functions.AggregateFunction;
 import org.apache.flink.types.Row;
 
 /**
  * @author hao.peng01@hand-china.com 2020/12/24 16:45
  */
-public class UdtTest1ScalarFunction {
+public class UdtTest3AggregateFunction {
     public static void main(String[] args) throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.setParallelism(1);
@@ -30,30 +31,44 @@ public class UdtTest1ScalarFunction {
 //        3. 将流转换成表
         Table sensorTable = tableEnv.fromDataStream(dataStream, "id, timestamp as ts,temperature as temp");
 
-        //4.自定义标量函数，实现求id的hash值
+        //4.自定义聚合函数，求当前传感器的平均温度值
         //4.1 table API
-        HashCode hashCode = new HashCode(23);
-        //需要在环境中注册UDF
-        tableEnv.registerFunction("hashCode", hashCode);
-        Table resultTable = sensorTable.select("id,ts, hashCode(id) ");
+        AvgTemp avgTemp = new AvgTemp();
+        tableEnv.registerFunction("avgTemp", avgTemp);
+        Table resultTable = sensorTable
+                .groupBy("id")
+                .aggregate("avgTemp(temp) as avgtemp")
+                .select("id,avgtemp");
         //4.2 SQL
         tableEnv.createTemporaryView("sensor", sensorTable);
-        Table resultSqlTable = tableEnv.sqlQuery("select id, ts, hashCode(id) from sensor");
+        Table resultSqlTable = tableEnv.sqlQuery("select id, avgTemp(temp) " +
+                " from sensor group by id");
+
+
         //打印输出
-        tableEnv.toAppendStream(resultTable, Row.class).print("result");
-        tableEnv.toAppendStream(resultSqlTable, Row.class).print("sql");
+        tableEnv.toRetractStream(resultTable, Row.class).print("result");
+        tableEnv.toRetractStream(resultSqlTable, Row.class).print("sql");
         env.execute();
     }
 
-    public static class HashCode extends ScalarFunction {
-        private int factor = 13;
+    //实现自定义AggregateFunction
+    public static class AvgTemp extends AggregateFunction<Double, Tuple2<Double, Integer>> {
 
-        public HashCode(int factor) {
-            this.factor = factor;
+        @Override
+        public Double getValue(Tuple2<Double, Integer> accumulator) {
+            return accumulator.f0 / accumulator.f1;
         }
 
-        public int eval(String str) {
-            return str.hashCode() * factor;
+        @Override
+        public Tuple2<Double, Integer> createAccumulator() {
+            return new Tuple2<>(0.0, 0);
+        }
+
+        //必须实现一个accumulator方法，来数据之后更新状态
+        public void accumulate(Tuple2<Double, Integer> accumulator, Double temp) {
+            accumulator.f0 += temp;
+            accumulator.f1 += 1;
         }
     }
+
 }
